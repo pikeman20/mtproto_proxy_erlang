@@ -74,8 +74,9 @@ get_downstream_pool(DcId) ->
     try whereis(mtp_dc_pool:dc_to_pool_name(DcId)) of
         undefined -> not_found;
         Pid when is_pid(Pid) -> {ok, Pid}
-    catch error:invalid_dc_id ->
-            not_found
+    catch
+        error:invalid_dc_id -> not_found;
+        error:_ -> not_found
     end.
 
 -spec get_netloc_safe(dc_id()) -> {dc_id(), netloc()}.
@@ -110,10 +111,12 @@ get_secret() ->
 -spec status() -> [mtp_dc_pool:status()].
 status() ->
     [{?IDS_KEY, L}] = ets:lookup(?TAB, ?IDS_KEY),
-    lists:map(
+    lists:filtermap(
       fun(DcId) ->
-              {ok, Pid} = get_downstream_pool(DcId),
-              mtp_dc_pool:status(Pid)
+          case get_downstream_pool(DcId) of
+              {ok, Pid} -> {true, mtp_dc_pool:status(Pid)};
+              not_found -> false
+          end
       end, L).
 
 
@@ -170,6 +173,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+is_ip_reachable(Ip, Port) ->
+    Timeout = 2000,
+    case gen_tcp:connect(Ip, Port, [binary, {active, false}], Timeout) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        {error, _} ->
+            false
+    end.
+
 update(#state{tab = Tab}, force) ->
     update_ip(),
     update_key(Tab),
@@ -222,17 +235,41 @@ update_downstreams(Downstreams, Tab) ->
      || {DcId, Netlocs} <- maps:to_list(ByDc)],
     lists:foreach(
       fun(DcId) ->
-              case get_downstream_pool(DcId) of
-                  not_found ->
-                      {ok, _Pid} = mtp_dc_pool_sup:start_pool(DcId);
-                  {ok, _} ->
-                      ok
+              Netlocs = maps:get(DcId, ByDc, []),
+              case lists:any(fun({Ip, Port}) -> is_ip_reachable(Ip, Port) end, Netlocs) of
+                  true ->
+                      case get_downstream_pool(DcId) of
+                          not_found ->
+                              case catch mtp_dc_pool_sup:start_pool(DcId) of
+                                  {ok, _Pid} -> ok;
+                                  {'EXIT', Reason} ->
+                                      ?log(error, "Failed to start pool for DC ~p: ~p", [DcId, Reason]),
+                                      error;
+                                  Error ->
+                                      ?log(error, "Failed to start pool for DC ~p: ~p", [DcId, Error]),
+                                      error
+                              end;
+                          {ok, _} ->
+                              ok
+                      end;
+                  false ->
+                      ?log(warning, "Skipping DC ~p: all downstream IPs unreachable", [DcId])
               end
       end,
       maps:keys(ByDc)).
 
 update_ids(Downstreams, Tab) ->
-    Ids = lists:usort([DcId || {DcId, _, _} <- Downstreams]),
+    % Only include reachable DCs in the ID list
+    ByDc = lists:foldl(
+             fun({DcId, Ip, Port}, Acc) ->
+                     Netlocs = maps:get(DcId, Acc, []),
+                     Acc#{DcId => [{Ip, Port} | Netlocs]}
+             end, #{}, Downstreams),
+    ReachableDCs =
+        [DcId ||
+            {DcId, Netlocs} <- maps:to_list(ByDc),
+            lists:any(fun({Ip, Port}) -> is_ip_reachable(Ip, Port) end, Netlocs)],
+    Ids = lists:usort(ReachableDCs),
     true = ets:insert(Tab, {?IDS_KEY, Ids}).
 
 update_ip() ->
