@@ -512,3 +512,11 @@ Number of connections
 ```bash
 /opt/mtp_proxy/bin/mtp_proxy eval 'lists:sum([proplists:get_value(all_connections, L) || {_, L} <- ranch:info()]).'
 ```
+
+## HTTP Stats Endpoint
+
+This MTProto proxy includes a built-in Cowboy-based HTTP server that serves metrics and statistics at the `/stats` endpoint on port 8080.
+
+- Access `http://localhost:8080/stats` to view proxy statistics such as connection counts and uptime.
+- The endpoint supports both HTML and JSON responses. Use the `Accept` header to request JSON (`application/json`) or HTML (`text/html`).
+- This endpoint is useful for monitoring and debugging the proxy's runtime state.

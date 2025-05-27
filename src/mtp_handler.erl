@@ -271,7 +271,7 @@ switch_timer(#state{timer_state = FromState, timer = Timer, listener = Listener}
             timer = Timer1}.
 
 state_timeout(init) ->
-    {init_timeout_sec, 60};
+    {init_timeout_sec, 300};
 state_timeout(hibernate) ->
     {hibernate_timeout_sec, 60};
 state_timeout(stop) ->
@@ -294,7 +294,34 @@ handle_upstream_data(Bin, #state{stage = tunnel,
                   {S2, S2#state.codec}
           end, S, Bin, UpCodec),
     {ok, S3#state{codec = UpCodec1}};
-handle_upstream_data(Bin, #state{codec = Codec0} = S0) ->
+handle_upstream_data(Bin, #state{codec = Codec0, sock = Sock, addr = {Ip, Port}, transport = Transport} = S0) ->
+    %% Proxy HTTP request to HTTP server (localhost:8080)
+    case Bin of
+        << "GET ", _/binary >> ->
+            ?log(info, "Proxy HTTP request from ~s:~p to HTTP server 127.0.0.1:8080", [inet:ntoa(Ip), Port]),
+            proxy_http_request(Sock, Bin, Transport),
+            throw({stop, normal, S0});
+        << "POST ", _/binary >> ->
+            ?log(info, "Proxy HTTP request from ~s:~p to HTTP server 127.0.0.1:8080", [inet:ntoa(Ip), Port]),
+            proxy_http_request(Sock, Bin, Transport),
+            throw({stop, normal, S0});
+        << "HEAD ", _/binary >> ->
+            ?log(info, "Proxy HTTP request from ~s:~p to HTTP server 127.0.0.1:8080", [inet:ntoa(Ip), Port]),
+            proxy_http_request(Sock, Bin, Transport),
+            throw({stop, normal, S0});
+        << "PUT ", _/binary >> ->
+            ?log(info, "Proxy HTTP request from ~s:~p to HTTP server 127.0.0.1:8080", [inet:ntoa(Ip), Port]),
+            proxy_http_request(Sock, Bin, Transport),
+            throw({stop, normal, S0});
+        << "DELETE ", _/binary >> ->
+            ?log(info, "Proxy HTTP request from ~s:~p to HTTP server 127.0.0.1:8080", [inet:ntoa(Ip), Port]),
+            proxy_http_request(Sock, Bin, Transport),
+            throw({stop, normal, S0});
+        << "OPTIONS ", _/binary >> ->
+            ?log(info, "Proxy HTTP request from ~s:~p to HTTP server 127.0.0.1:8080", [inet:ntoa(Ip), Port]),
+            proxy_http_request(Sock, Bin, Transport),
+            throw({stop, normal, S0});
+        _ ->
     {ok, S, Codec} =
         mtp_codec:fold_packets_if(
           fun(Decoded, S1, Codec1) ->
@@ -305,7 +332,36 @@ handle_upstream_data(Bin, #state{codec = Codec0} = S0) ->
                           {stop, S2, S2#state.codec}
                   end
           end, S0, Bin, Codec0),
-    {ok, S#state{codec = Codec}}.
+            {ok, S#state{codec = Codec}}
+    end.
+
+proxy_http_request(ClientSock, FirstData, Transport) ->
+    case gen_tcp:connect({127,0,0,1}, 8080, [binary, {active, false}]) of
+        {ok, HttpSock} ->
+            ok = gen_tcp:send(HttpSock, FirstData),
+            proxy_http_loop(ClientSock, HttpSock, Transport);
+        {error, Reason} ->
+            Response = <<"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n">>,
+            Transport:send(ClientSock, Response),
+            Transport:close(ClientSock)
+    end.
+
+proxy_http_loop(ClientSock, HttpSock, Transport) ->
+    inet:setopts(ClientSock, [{active, false}]),
+    loop(ClientSock, HttpSock, Transport).
+
+loop(ClientSock, HttpSock, Transport) ->
+    case gen_tcp:recv(HttpSock, 0, 1000) of
+        {ok, Data} ->
+            Transport:send(ClientSock, Data),
+            loop(ClientSock, HttpSock, Transport);
+        {error, closed} ->
+            Transport:close(ClientSock),
+            gen_tcp:close(HttpSock);
+        {error, _} ->
+            Transport:close(ClientSock),
+            gen_tcp:close(HttpSock)
+    end.
 
 
 parse_upstream_data(<<?TLS_START, _/binary>> = AllData,

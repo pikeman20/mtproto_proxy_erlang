@@ -58,6 +58,11 @@ init([]) ->
               #{id => mtp_policy_table,
                 start => {mtp_policy_table, start_link, []}},
               #{id => mtp_policy_counter,
-                start => {mtp_policy_counter, start_link, []}}
+                start => {mtp_policy_counter, start_link, []}},
+              #{id => mtp_stats_http_listener,
+                start => {mtp_stats_http_listener, start_link, []},
+                type => worker,
+                restart => permanent,
+                shutdown => 5000}
              ],
-    {ok, {SupFlags, Childs}}.
+     {ok, {SupFlags, Childs}}.

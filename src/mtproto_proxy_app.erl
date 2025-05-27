@@ -15,7 +15,8 @@
          running_ports/0,
          start_proxy/1,
          build_urls/4,
-         get_port_secret/1]).
+         get_port_secret/1,
+         get_uptime/0]).
 
 -define(APP, mtproto_proxy).
 
@@ -31,6 +32,8 @@
 %% Application behaviour API
 %%====================================================================
 start(_StartType, _StartArgs) ->
+    StartTime = erlang:monotonic_time(second),
+    persistent_term:put({mtproto_proxy, start_time}, StartTime),
     Res = {ok, _} = mtproto_proxy_sup:start_link(),
     report("+++++++++++++++++++++++++++++++++++++++~n"
            "Erlang MTProto proxy by @seriyps https://github.com/seriyps/mtproto_proxy~n"
@@ -259,3 +262,9 @@ env_diff_test() ->
        diff_env(Post, Pre)).
 
 -endif.
+
+get_uptime() ->
+    case persistent_term:get({mtproto_proxy, start_time}, undefined) of
+        undefined -> 0;
+        StartTime -> erlang:monotonic_time(second) - StartTime
+    end.

@@ -6,6 +6,7 @@
   {applications,
    [lager,
     ranch,
+    cowboy,
     erlang_psq,
     crypto,
     ssl,
@@ -50,7 +51,7 @@
         %%  ]},
 
         %% Close connection if it failed to perform handshake in this many seconds
-        {init_timeout_sec, 60},
+        {init_timeout_sec, 300},
         %% Switch client to memory-saving mode after this many seconds of inactivity
         {hibernate_timeout_sec, 60},
         %% Close client connection after this many seconds of inactivity
